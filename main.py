@@ -22,6 +22,8 @@ class EmailTestingApp:
         self.temp_dir = Path(tempfile.gettempdir()) / "email_testing_server"
         self.temp_dir.mkdir(exist_ok=True)
         self.messages = []
+        self.last_message_count = 0  # Track last message count for optimization
+        self.last_read_count = 0  # Track last read count for optimization
         self.total_messages = ft.Text(
             f"Total Messages: {len(self.messages)}",
             color=ft.Colors.WHITE,
@@ -31,6 +33,7 @@ class EmailTestingApp:
             color=ft.Colors.WHITE,
             size=14,
         )
+        self._refresh_running = False  # Flag to prevent concurrent refreshes
         logger.info("EmailTestingApp initialized")
 
     def _create_html_file(self, content: str, message_id: int) -> str:
@@ -409,7 +412,7 @@ class EmailTestingApp:
 
         # Start auto-refresh timer
         def auto_refresh():
-            if self.email_server.is_running():
+            if self.email_server.is_running() and not self._refresh_running:
                 self.refresh_emails(None)
             page.update()
 
@@ -503,28 +506,46 @@ class EmailTestingApp:
         self.start_button.disabled = False
 
     def refresh_emails(self, e):
-        if self.email_server.is_running():
-            try:
-                self.messages = self.email_server.handler.get_messages()
-                logger.info(
-                    f"Refreshing email list. Found {len(self.messages)} messages"
-                )
+        if not self.email_server.is_running() or self._refresh_running:
+            return
 
-                # Update total messages count
+        try:
+            self._refresh_running = True
+            new_messages = self.email_server.handler.get_messages()
+            new_read_count = len(self.read_messages)
+
+            # Only update if there are actual changes
+            if (
+                len(new_messages) != self.last_message_count
+                or new_read_count != self.last_read_count
+                or any(
+                    new_msg["id"] != old_msg["id"]
+                    for new_msg, old_msg in zip(new_messages, self.messages)
+                )
+            ):
+
+                self.messages = new_messages
+                self.last_message_count = len(new_messages)
+                self.last_read_count = new_read_count
+
+                # Update message counts
                 self.total_messages.value = f"Total Messages: {len(self.messages)}"
-                self.total_messages.update()
                 self.message_read_info.value = (
-                    f"{len(self.read_messages)} / {len(self.messages)}"
+                    f"{new_read_count} / {len(self.messages)}"
                 )
-                self.message_read_info.update()
 
-                # Clear and update email list
+                # Clear and update email list only if needed
                 if hasattr(self.email_list.content, "controls"):
-                    self.email_list.content.controls.clear()
-                    # Only show messages that exist in the server
+                    # Store current scroll position
+                    current_scroll = getattr(
+                        self.email_list.content, "scroll_offset", 0
+                    )
+
+                    # Pre-allocate list for better performance
+                    controls = []
                     for msg in self.messages:
                         is_read = msg["id"] in self.read_messages
-                        self.email_list.content.controls.append(
+                        controls.append(
                             ft.Card(
                                 content=ft.Container(
                                     content=ft.Row(
@@ -554,7 +575,7 @@ class EmailTestingApp:
                                                         ),
                                                         max_lines=1,
                                                         overflow=ft.TextOverflow.ELLIPSIS,
-                                                        expand=1,  # 👈 Required
+                                                        expand=1,
                                                     ),
                                                     ft.Text(
                                                         f"Subject: {msg['subject']}",
@@ -565,7 +586,7 @@ class EmailTestingApp:
                                                         ),
                                                         max_lines=1,
                                                         overflow=ft.TextOverflow.ELLIPSIS,
-                                                        expand=1,  # 👈 Required
+                                                        expand=1,
                                                     ),
                                                     ft.Text(
                                                         f"Date: {msg['date']}",
@@ -573,15 +594,15 @@ class EmailTestingApp:
                                                         size=12,
                                                         max_lines=1,
                                                         overflow=ft.TextOverflow.ELLIPSIS,
-                                                        expand=1,  # 👈 Required
+                                                        expand=1,
                                                     ),
                                                 ],
                                                 spacing=5,
-                                                expand=True,  # 👈 Constrains Column within Row
+                                                expand=True,
                                             ),
                                         ],
                                         spacing=10,
-                                        tight=True,  # 👈 Important to apply constraints
+                                        tight=True,
                                     ),
                                     width=380,
                                     padding=10,
@@ -596,9 +617,26 @@ class EmailTestingApp:
                                 ),
                             )
                         )
-                self.email_list.update()
-            except Exception as e:
-                logger.error(f"Error refreshing emails: {str(e)}")
+
+                    # Batch update controls
+                    self.email_list.content.controls.clear()
+                    self.email_list.content.controls.extend(controls)
+
+                    # Restore scroll position if possible
+                    try:
+                        self.email_list.content.scroll_offset = current_scroll
+                    except:
+                        pass
+
+                    # Batch update UI
+                    self.email_list.update()
+                    self.total_messages.update()
+                    self.message_read_info.update()
+
+        except Exception as e:
+            logger.error(f"Error refreshing emails: {str(e)}")
+        finally:
+            self._refresh_running = False
 
     def _open_in_browser(self, e):
         """Open the HTML content in the default web browser."""
@@ -671,19 +709,21 @@ class EmailTestingApp:
     def delete_selected_email(self, e):
         if self.selected_message:
             try:
+                # Store message info before deletion
+                message_id = self.selected_message["id"]
+                message_from = self.selected_message["from"]
+
                 # Delete from server first
-                if self.email_server.handler.delete_message(
-                    self.selected_message["id"]
-                ):
+                if self.email_server.handler.delete_message(message_id):
                     # Remove from read messages set
-                    self.read_messages.discard(self.selected_message["id"])
+                    self.read_messages.discard(message_id)
                     # Clear the selected message
                     self.selected_message = None
                     # Close the details view
                     self.close_email_details(e)
                     # Refresh the email list immediately
                     self.refresh_emails(e)
-                    logger.info(f"Deleted email from {self.selected_message['from']}")
+                    logger.info(f"Deleted email from {message_from}")
                 else:
                     logger.error("Failed to delete email from server")
             except Exception as e:
@@ -704,9 +744,16 @@ class EmailTestingApp:
     def __del__(self):
         """Clean up temporary files when the app is closed."""
         try:
+            self._refresh_running = True  # Stop any ongoing refresh
             for file in self.temp_dir.glob("email_*.html"):
-                file.unlink()
-            self.temp_dir.rmdir()
+                try:
+                    file.unlink()
+                except Exception as e:
+                    logger.error(f"Error deleting file {file}: {str(e)}")
+            try:
+                self.temp_dir.rmdir()
+            except Exception as e:
+                logger.error(f"Error removing temp directory: {str(e)}")
         except Exception as e:
             logger.error(f"Error cleaning up temporary files: {str(e)}")
 
