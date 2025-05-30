@@ -96,7 +96,7 @@ def install_dependencies(python_exe, pip_exe):
         "flet==0.28.3",  # Updated to exact version from requirements.txt
         "flet-cli==0.28.3",
         "flet-desktop==0.28.3",
-        "flet-desktop-light==0.28.3",
+        # "flet-desktop-light==0.28.3",
         "flet-web==0.28.3",
         "aiosmtpd==1.4.6",
         "html2text==2025.4.15",

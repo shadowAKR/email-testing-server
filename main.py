@@ -8,6 +8,7 @@ import os
 import webbrowser
 from pathlib import Path
 import html2text
+import platform
 from typing import Optional, List, Dict, Any, Set, Union, cast
 
 # Setup logging
@@ -144,13 +145,16 @@ class EmailTestingApp:
         self._initialized = True
 
         # Set up the page
-        page.title = "Local Email Testing Server"
+        page.title = "Email Testing Server"
         page.theme_mode = ft.ThemeMode.DARK
         page.theme = ft.Theme(font_family="Poppins")
         page.window.maximized = True
         page.window.resizable = True
         page.padding = 20
         page.bgcolor = "#1a1a1a"
+        icon_path = "icon.ico" if platform.system() == "Windows" else "icon.png"
+        page.window_icon = icon_path
+        page.icon = icon_path
 
         # Initialize server
         self.initialize_server()
@@ -852,7 +856,7 @@ def main():
     try:
         logger.info("Starting Email Testing Server application")
         app = EmailTestingApp()
-        ft.app(target=app.main)
+        ft.app(target=app.main, assets_dir="assets")
     except Exception as e:
         logger.error(f"Application error: {str(e)}")
         raise
