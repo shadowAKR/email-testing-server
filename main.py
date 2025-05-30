@@ -1,10 +1,13 @@
+import time
 import flet as ft
 from email_server import EmailServer
-import json
 import logging
-import time
-import html
 from logger_config import setup_logging
+import tempfile
+import os
+import webbrowser
+from pathlib import Path
+import html2text
 
 # Setup logging
 loggers = setup_logging()
@@ -16,46 +19,113 @@ class EmailTestingApp:
         self.email_server = EmailServer()
         self.selected_message = None
         self.read_messages = set()  # Track read message IDs
-        self.last_refresh_time = 0
-        self.refresh_interval = 5  # seconds
+        self.temp_dir = Path(tempfile.gettempdir()) / "email_testing_server"
+        self.temp_dir.mkdir(exist_ok=True)
+        self.messages = []
+        self.total_messages = ft.Text(
+            f"Total Messages: {len(self.messages)}",
+            color=ft.Colors.WHITE,
+        )
+        self.message_read_info = ft.Text(
+            f"{len(self.read_messages)} / {len(self.messages)}",
+            color=ft.Colors.WHITE,
+            size=14,
+        )
         logger.info("EmailTestingApp initialized")
+
+    def _create_html_file(self, content: str, message_id: int) -> str:
+        """Create a temporary HTML file with the email content."""
+        html_file = self.temp_dir / f"email_{message_id}.html"
+
+        # Create a complete HTML document with proper styling that preserves email layout
+        full_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {{
+                    margin: 0;
+                    height: 100vh;
+                    width: 100vw;
+                    display: flex;
+                    justify-content: center; /* horizontal center */
+                    align-items: center;    /* vertical center */
+                    background-color: #f0f0f0;
+                    padding: 20px;
+                }}
+                /* Preserve original email styling */
+                * {{
+                    max-width: 100%;
+                    box-sizing: border-box;
+                }}
+                img {{
+                    max-width: 100%;
+                    height: auto;
+                    display: inline-block;
+                }}
+                table {{
+                    border-collapse: collapse;
+                    margin: 10px 0;
+                    width: auto !important;
+                }}
+                th, td {{
+                    border: 1px solid #ddd;
+                    padding: 8px;
+                    text-align: left;
+                }}
+                th {{
+                    background-color: #f5f5f5;
+                }}
+                pre {{
+                    background-color: #f5f5f5;
+                    padding: 10px;
+                    border-radius: 4px;
+                    overflow-x: auto;
+                    white-space: pre-wrap;
+                }}
+                code {{
+                    font-family: 'Courier New', Courier, monospace;
+                }}
+                /* Preserve original colors and styles */
+                .email-content {{
+                    all: revert;
+                    max-width: 800px;
+                    text-align: center;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="email-content">
+                {content}
+            </div>
+        </body>
+        </html>
+        """
+
+        html_file.write_text(full_html, encoding="utf-8")
+        return str(html_file)
+
+    def apply_hover_style(self, button, hover_color, default_color):
+        def on_hover(e):
+            button.style.bgcolor = hover_color if e.data == "true" else default_color
+            button.update()
+
+        return on_hover
 
     def main(self, page: ft.Page):
         logger.info("Starting EmailTestingApp main window")
         page.title = "Local Email Testing Server"
         page.theme_mode = ft.ThemeMode.DARK
-        page.window_width = 1200
-        page.window_height = 800
+        page.theme = ft.Theme(font_family="Poppins")
+        page.window.maximized = True
+        page.window.resizable = True
         page.padding = 20
         page.bgcolor = "#1a1a1a"
 
-        # Server settings
-        self.username_field = ft.TextField(
-            label="Username",
-            hint_text="Leave empty for no authentication",
-            border_color=ft.Colors.BLUE_700,
-            bgcolor=ft.Colors.BLACK45,
-            color=ft.Colors.WHITE,
-            visible=True,  # Initially visible since server starts stopped
-        )
-        self.password_field = ft.TextField(
-            label="Password",
-            hint_text="Leave empty for no authentication",
-            password=True,
-            can_reveal_password=True,
-            border_color=ft.Colors.BLUE_700,
-            bgcolor=ft.Colors.BLACK45,
-            color=ft.Colors.WHITE,
-            visible=True,  # Initially visible since server starts stopped
-        )
-        self.tls_switch = ft.Switch(
-            label="Enable TLS",
-            value=False,
-            label_style=ft.TextStyle(color=ft.Colors.WHITE),
-            visible=True,  # Initially visible since server starts stopped
-        )
-
         # Server status and controls
+
         self.status_text = ft.Text(
             "Server Status: Stopped", color="red", size=16, weight=ft.FontWeight.BOLD
         )
@@ -68,6 +138,11 @@ class EmailTestingApp:
                 shape=ft.RoundedRectangleBorder(radius=8),
             ),
         )
+        self.start_button.on_hover = self.apply_hover_style(
+            button=self.start_button,
+            hover_color=ft.Colors.GREEN_500,
+            default_color=ft.Colors.GREEN_700,
+        )
         self.clear_button = ft.ElevatedButton(
             "Clear All Emails",
             on_click=self.clear_emails,
@@ -76,6 +151,11 @@ class EmailTestingApp:
                 bgcolor=ft.Colors.RED_700,
                 shape=ft.RoundedRectangleBorder(radius=8),
             ),
+        )
+        self.clear_button.on_hover = self.apply_hover_style(
+            button=self.clear_button,
+            hover_color=ft.Colors.RED_500,
+            default_color=ft.Colors.RED_700,
         )
         self.refresh_button = ft.ElevatedButton(
             "Refresh",
@@ -86,6 +166,11 @@ class EmailTestingApp:
                 shape=ft.RoundedRectangleBorder(radius=8),
             ),
         )
+        self.refresh_button.on_hover = self.apply_hover_style(
+            button=self.refresh_button,
+            hover_color=ft.Colors.BLUE_500,
+            default_color=ft.Colors.BLUE_700,
+        )
 
         # Configuration display
         self.config_text = ft.Text(
@@ -95,13 +180,10 @@ class EmailTestingApp:
             color=ft.Colors.WHITE,
         )
         self.config_display = ft.Container(
-            content=ft.Column(
-                [ft.Text("Server not running", color=ft.Colors.GREY_400)]
-            ),
+            content=ft.Row([ft.Text("Server not running", color=ft.Colors.GREY_400)]),
             padding=10,
             bgcolor=ft.Colors.BLACK45,
             border_radius=8,
-            width=300,
         )
         self.port_notification = ft.Text(
             "", color=ft.Colors.ORANGE, size=14, visible=False
@@ -109,11 +191,13 @@ class EmailTestingApp:
 
         # Email list
         self.email_list = ft.Container(
-            content=ft.ListView(spacing=10, padding=10, auto_scroll=True, height=400),
+            content=ft.ListView(spacing=10, padding=10),
             bgcolor=ft.Colors.BLACK45,
             border_radius=8,
             padding=10,
-            width=300,
+            width=400,
+            height=600,
+            expand=True,
         )
 
         # Email details view
@@ -160,11 +244,76 @@ class EmailTestingApp:
                         padding=5,
                     ),
                     ft.Container(
-                        content=ft.Markdown(
-                            "",
-                            selectable=True,
-                            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                            code_theme="atom-one-dark",
+                        content=ft.Column(
+                            [
+                                ft.Text(
+                                    "Content",
+                                    size=16,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=ft.Colors.WHITE,
+                                ),
+                                ft.Tabs(
+                                    selected_index=0,
+                                    animation_duration=300,
+                                    tabs=[
+                                        ft.Tab(
+                                            text="HTML View",
+                                            content=ft.Container(
+                                                content=ft.Column(
+                                                    [
+                                                        ft.Row(
+                                                            [
+                                                                ft.ElevatedButton(
+                                                                    "Open in Browser",
+                                                                    icon=ft.Icons.LAUNCH,
+                                                                    on_click=lambda e: (
+                                                                        self._open_in_browser(
+                                                                            e
+                                                                        )
+                                                                        if self.selected_message
+                                                                        else None
+                                                                    ),
+                                                                    style=ft.ButtonStyle(
+                                                                        color=ft.Colors.WHITE,
+                                                                        bgcolor=ft.Colors.BLUE_700,
+                                                                        shape=ft.RoundedRectangleBorder(
+                                                                            radius=8
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            ],
+                                                            alignment=ft.MainAxisAlignment.END,
+                                                        ),
+                                                        ft.Markdown(
+                                                            "",
+                                                            selectable=True,
+                                                            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                                                        ),
+                                                    ],
+                                                    spacing=10,
+                                                ),
+                                                bgcolor=ft.Colors.BLACK45,
+                                                border_radius=8,
+                                                padding=10,
+                                                expand=True,
+                                            ),
+                                        ),
+                                        ft.Tab(
+                                            text="Plain Text",
+                                            content=ft.TextField(
+                                                read_only=True,
+                                                multiline=True,
+                                                border_color=ft.Colors.BLUE_700,
+                                                bgcolor=ft.Colors.BLACK45,
+                                                color=ft.Colors.WHITE,
+                                                expand=True,
+                                            ),
+                                        ),
+                                    ],
+                                    expand=True,
+                                ),
+                            ],
+                            spacing=10,
                         ),
                         padding=5,
                         expand=True,
@@ -207,16 +356,9 @@ class EmailTestingApp:
             ft.Container(
                 content=ft.Column(
                     [
-                        ft.Text(
-                            "Server Settings",
-                            size=20,
-                            weight=ft.FontWeight.BOLD,
-                            color=ft.Colors.WHITE,
-                        ),
-                        self.username_field,
-                        self.password_field,
-                        self.tls_switch,
-                        ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
+                        self.config_text,
+                        self.config_display,
+                        self.port_notification,
                         ft.Row(
                             [
                                 self.status_text,
@@ -238,19 +380,24 @@ class EmailTestingApp:
                 [
                     ft.Column(
                         [
-                            self.config_text,
-                            self.config_display,
-                            self.port_notification,
-                            ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
-                            ft.Text(
-                                "Email Messages",
-                                size=20,
-                                weight=ft.FontWeight.BOLD,
-                                color=ft.Colors.WHITE,
+                            ft.Row(
+                                controls=[
+                                    ft.Text(
+                                        "Email Messages",
+                                        size=20,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=ft.Colors.WHITE,
+                                    ),
+                                    self.message_read_info,
+                                ],
+                                width=400,
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                                spacing=10,
                             ),
                             self.email_list,
                         ],
                         spacing=10,
+                        width=400,
                     ),
                     ft.VerticalDivider(width=1, color=ft.Colors.GREY_800),
                     self.email_details,
@@ -261,64 +408,74 @@ class EmailTestingApp:
         )
 
         # Start auto-refresh timer
-        def auto_refresh(e):
+        def auto_refresh():
             if self.email_server.is_running():
                 self.refresh_emails(None)
             page.update()
 
-        page.on_timer = auto_refresh
-        page.timer_interval = 5000  # 5000ms = 5 seconds
+        while True:
+            try:
+                auto_refresh()
+                time.sleep(5)  # Refresh every 5 seconds
+            except Exception as e:
+                logger.error(f"Error during auto-refresh: {str(e)}")
+                break
 
     def toggle_server(self, e):
+        self.start_button.disabled = True
         if self.email_server.is_running():
             logger.info("Stopping email server")
             self.email_server.stop()
             self.status_text.value = "Server Status: Stopped"
             self.status_text.color = "red"
             self.start_button.text = "Start Server"
-            self.config_display.content = ft.Column(
+            self.start_button.style = ft.ButtonStyle(
+                color=ft.Colors.WHITE,
+                bgcolor=ft.Colors.GREEN_700,
+                shape=ft.RoundedRectangleBorder(radius=8),
+            )
+            self.start_button.on_hover = self.apply_hover_style(
+                button=self.start_button,
+                hover_color=ft.Colors.GREEN_500,
+                default_color=ft.Colors.GREEN_700,
+            )
+            self.config_display.content = ft.Row(
                 [ft.Text("Server not running", color=ft.Colors.GREY_400)]
             )
             self.port_notification.visible = False
-
-            # Show authentication and TLS settings when server is stopped
-            self.username_field.visible = True
-            self.password_field.visible = True
-            self.tls_switch.visible = True
         else:
             try:
                 logger.info("Starting email server")
-                # Create new server instance with current settings
-                self.email_server = EmailServer(
-                    username=self.username_field.value,
-                    password=self.password_field.value,
-                    use_tls=self.tls_switch.value,
-                )
+                self.email_server = EmailServer()  # Create new server instance
                 self.email_server.start()
                 self.status_text.value = "Server Status: Running"
                 self.status_text.color = "green"
                 self.start_button.text = "Stop Server"
+                self.start_button.style = ft.ButtonStyle(
+                    color=ft.Colors.WHITE,
+                    bgcolor=ft.Colors.RED_700,
+                    shape=ft.RoundedRectangleBorder(radius=8),
+                )
+                self.start_button.on_hover = self.apply_hover_style(
+                    button=self.start_button,
+                    hover_color=ft.Colors.RED_500,
+                    default_color=ft.Colors.RED_700,
+                )
                 config = self.email_server.get_config()
 
-                # Hide authentication and TLS settings when server is running
-                self.username_field.visible = False
-                self.password_field.visible = False
-                self.tls_switch.visible = False
-
                 # Format configuration display
-                config_text = ft.Column(
+                config_text = ft.Row(
                     [
                         ft.Text(f"Host: {config['host']}", color=ft.Colors.WHITE),
                         ft.Text(f"Port: {config['port']}", color=ft.Colors.WHITE),
                         ft.Text(
-                            f"Authentication: {'Enabled' if config['username'] else 'None'}",
+                            "No Authentication Required",
                             color=ft.Colors.WHITE,
                         ),
-                        ft.Text(
-                            f"TLS: {'Enabled' if config['tls'] else 'Disabled'}",
-                            color=ft.Colors.WHITE,
-                        ),
-                    ]
+                        ft.Text("TLS: Disabled", color=ft.Colors.WHITE),
+                        self.total_messages,
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 )
                 self.config_display.content = config_text
 
@@ -332,7 +489,7 @@ class EmailTestingApp:
                 else:
                     self.port_notification.visible = False
             except OSError as error:
-                logger.error(f"Failed to start server: {str(error)}")
+                logger.exception(f"Failed to start server: {str(error)}")
                 self.status_text.value = f"Server Error: {str(error)}"
                 self.status_text.color = "red"
                 self.port_notification.visible = False
@@ -342,93 +499,162 @@ class EmailTestingApp:
         self.start_button.update()
         self.config_display.update()
         self.port_notification.update()
-        self.username_field.update()
-        self.password_field.update()
-        self.tls_switch.update()
         self.refresh_emails(e)
+        self.start_button.disabled = False
 
     def refresh_emails(self, e):
         if self.email_server.is_running():
             try:
-                messages = self.email_server.handler.get_messages()
-                logger.info(f"Refreshing email list. Found {len(messages)} messages")
+                self.messages = self.email_server.handler.get_messages()
+                logger.info(
+                    f"Refreshing email list. Found {len(self.messages)} messages"
+                )
 
-                self.email_list.content.controls.clear()
-                for msg in messages:
-                    is_read = msg["id"] in self.read_messages
-                    self.email_list.content.controls.append(
-                        ft.Card(
-                            content=ft.Container(
-                                content=ft.Row(
-                                    [
-                                        ft.Icon(
-                                            name=(
-                                                ft.Icons.MAIL
-                                                if is_read
-                                                else ft.Icons.MAIL_OUTLINE
+                # Update total messages count
+                self.total_messages.value = f"Total Messages: {len(self.messages)}"
+                self.total_messages.update()
+                self.message_read_info.value = (
+                    f"{len(self.read_messages)} / {len(self.messages)}"
+                )
+                self.message_read_info.update()
+
+                # Clear and update email list
+                if hasattr(self.email_list.content, "controls"):
+                    self.email_list.content.controls.clear()
+                    # Only show messages that exist in the server
+                    for msg in self.messages:
+                        is_read = msg["id"] in self.read_messages
+                        self.email_list.content.controls.append(
+                            ft.Card(
+                                content=ft.Container(
+                                    content=ft.Row(
+                                        [
+                                            ft.Icon(
+                                                name=(
+                                                    ft.Icons.MARK_EMAIL_READ
+                                                    if is_read
+                                                    else ft.Icons.MARK_EMAIL_UNREAD
+                                                ),
+                                                color=(
+                                                    ft.Colors.BLUE_200
+                                                    if is_read
+                                                    else ft.Colors.WHITE
+                                                ),
+                                                size=20,
                                             ),
-                                            color=(
-                                                ft.Colors.BLUE_200
-                                                if is_read
-                                                else ft.Colors.WHITE
+                                            ft.Column(
+                                                [
+                                                    ft.Text(
+                                                        f"From: {msg['from']}",
+                                                        weight=ft.FontWeight.BOLD,
+                                                        color=(
+                                                            ft.Colors.BLUE_200
+                                                            if is_read
+                                                            else ft.Colors.WHITE
+                                                        ),
+                                                        max_lines=1,
+                                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                                        expand=1,  # 👈 Required
+                                                    ),
+                                                    ft.Text(
+                                                        f"Subject: {msg['subject']}",
+                                                        color=(
+                                                            ft.Colors.BLUE_200
+                                                            if is_read
+                                                            else ft.Colors.WHITE
+                                                        ),
+                                                        max_lines=1,
+                                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                                        expand=1,  # 👈 Required
+                                                    ),
+                                                    ft.Text(
+                                                        f"Date: {msg['date']}",
+                                                        color=ft.Colors.GREY_400,
+                                                        size=12,
+                                                        max_lines=1,
+                                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                                        expand=1,  # 👈 Required
+                                                    ),
+                                                ],
+                                                spacing=5,
+                                                expand=True,  # 👈 Constrains Column within Row
                                             ),
-                                            size=20,
-                                        ),
-                                        ft.Column(
-                                            [
-                                                ft.Text(
-                                                    f"From: {msg['from']}",
-                                                    weight=ft.FontWeight.BOLD,
-                                                    color=(
-                                                        ft.Colors.BLUE_200
-                                                        if is_read
-                                                        else ft.Colors.WHITE
-                                                    ),
-                                                ),
-                                                ft.Text(
-                                                    f"Subject: {msg['subject']}",
-                                                    color=(
-                                                        ft.Colors.BLUE_200
-                                                        if is_read
-                                                        else ft.Colors.WHITE
-                                                    ),
-                                                ),
-                                                ft.Text(
-                                                    f"Date: {msg['date']}",
-                                                    color=ft.Colors.GREY_400,
-                                                    size=12,
-                                                ),
-                                            ],
-                                            spacing=5,
-                                        ),
-                                    ],
-                                    spacing=10,
+                                        ],
+                                        spacing=10,
+                                        tight=True,  # 👈 Important to apply constraints
+                                    ),
+                                    width=380,
+                                    padding=10,
+                                    on_click=lambda e, m=msg: self.show_email_details(
+                                        m
+                                    ),
                                 ),
-                                padding=10,
-                                on_click=lambda e, m=msg: self.show_email_details(m),
-                            ),
-                            color=ft.Colors.BLUE_900 if is_read else ft.Colors.BLUE_800,
+                                color=(
+                                    ft.Colors.BLUE_900
+                                    if is_read
+                                    else ft.Colors.BLUE_800
+                                ),
+                            )
                         )
-                    )
                 self.email_list.update()
             except Exception as e:
                 logger.error(f"Error refreshing emails: {str(e)}")
+
+    def _open_in_browser(self, e):
+        """Open the HTML content in the default web browser."""
+        if self.selected_message and self.selected_message.get("html_content"):
+            try:
+                html_file = self._create_html_file(
+                    self.selected_message["html_content"], self.selected_message["id"]
+                )
+                webbrowser.open(f"file://{html_file}")
+                logger.info(
+                    f"Opened HTML content in browser for email {self.selected_message['id']}"
+                )
+            except Exception as e:
+                logger.error(f"Error opening HTML content in browser: {str(e)}")
 
     def show_email_details(self, message):
         try:
             self.selected_message = message
             self.read_messages.add(message["id"])  # Mark as read when opened
+
+            # Update header fields
             self.email_details.content.controls[1].content.value = message["from"]
             self.email_details.content.controls[2].content.value = message["to"]
             self.email_details.content.controls[3].content.value = message["subject"]
 
-            # Handle HTML content
+            # Get the content tabs container
+            content_tabs = self.email_details.content.controls[4].content.controls[1]
+
+            # Update HTML view
             if message.get("is_html") and message.get("html_content"):
-                self.email_details.content.controls[4].content.value = message[
-                    "html_content"
-                ]
+                # Create a temporary HTML file for the email content
+                html_file = self._create_html_file(
+                    message["html_content"], message["id"]
+                )
+                # Convert HTML to Markdown for display
+                h = html2text.HTML2Text()
+                h.ignore_links = False
+                h.ignore_images = False
+                h.ignore_emphasis = False
+                markdown_content = h.handle(message["html_content"])
+                content_tabs.tabs[0].content.content.controls[
+                    1
+                ].value = markdown_content
+                # Update the container to use a fixed width and center the content
+                content_tabs.tabs[0].content.content.controls[1].width = 800
+                content_tabs.tabs[0].content.content.controls[
+                    1
+                ].alignment = ft.MainAxisAlignment.CENTER
             else:
-                self.email_details.content.controls[4].content.value = message["body"]
+                content_tabs.tabs[0].content.content.controls[1].value = message["body"]
+
+            # Update plain text view
+            content_tabs.tabs[1].content.value = message["body"]
+
+            # Reset to first tab
+            content_tabs.selected_index = 0
 
             self.email_details.visible = True
             self.email_details.update()
@@ -445,10 +671,21 @@ class EmailTestingApp:
     def delete_selected_email(self, e):
         if self.selected_message:
             try:
-                self.email_server.handler.delete_message(self.selected_message["id"])
-                self.close_email_details(e)
-                self.refresh_emails(e)
-                logger.info(f"Deleted email from {self.selected_message['from']}")
+                # Delete from server first
+                if self.email_server.handler.delete_message(
+                    self.selected_message["id"]
+                ):
+                    # Remove from read messages set
+                    self.read_messages.discard(self.selected_message["id"])
+                    # Clear the selected message
+                    self.selected_message = None
+                    # Close the details view
+                    self.close_email_details(e)
+                    # Refresh the email list immediately
+                    self.refresh_emails(e)
+                    logger.info(f"Deleted email from {self.selected_message['from']}")
+                else:
+                    logger.error("Failed to delete email from server")
             except Exception as e:
                 logger.error(f"Error deleting email: {str(e)}")
 
@@ -456,12 +693,22 @@ class EmailTestingApp:
         try:
             self.email_server.handler.clear_messages()
             self.read_messages.clear()  # Clear read status
-            self.email_list.content.controls.clear()
+            if hasattr(self.email_list.content, "controls"):
+                self.email_list.content.controls.clear()
             self.email_list.update()
             self.close_email_details(e)
             logger.info("All emails cleared")
         except Exception as e:
             logger.error(f"Error clearing emails: {str(e)}")
+
+    def __del__(self):
+        """Clean up temporary files when the app is closed."""
+        try:
+            for file in self.temp_dir.glob("email_*.html"):
+                file.unlink()
+            self.temp_dir.rmdir()
+        except Exception as e:
+            logger.error(f"Error cleaning up temporary files: {str(e)}")
 
 
 def main():
