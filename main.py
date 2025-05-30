@@ -8,6 +8,7 @@ import os
 import webbrowser
 from pathlib import Path
 import html2text
+from typing import Optional, List, Dict, Any, Set, Union, cast
 
 # Setup logging
 loggers = setup_logging()
@@ -16,26 +17,41 @@ logger = loggers["app"]
 
 class EmailTestingApp:
     def __init__(self):
-        self.email_server = EmailServer()
-        self.selected_message = None
-        self.read_messages = set()  # Track read message IDs
+        logger.info("EmailTestingApp initializing...")
+        self.email_server: Optional[EmailServer] = None
+        self.selected_message: Optional[Dict[str, Any]] = None
+        self.read_messages: Set[int] = set()
         self.temp_dir = Path(tempfile.gettempdir()) / "email_testing_server"
         self.temp_dir.mkdir(exist_ok=True)
-        self.messages = []
-        self.last_message_count = 0  # Track last message count for optimization
-        self.last_read_count = 0  # Track last read count for optimization
-        self.total_messages = ft.Text(
+        self.messages: List[Dict[str, Any]] = []
+        self.last_message_count: int = 0
+        self.last_read_count: int = 0
+        self.total_messages: ft.Text = ft.Text(
             f"Total Messages: {len(self.messages)}",
             color=ft.Colors.WHITE,
         )
-        self.message_read_info = ft.Text(
+        self.message_read_info: ft.Text = ft.Text(
             f"{len(self.read_messages)} / {len(self.messages)}",
             color=ft.Colors.WHITE,
             size=14,
         )
-        self._refresh_running = False  # Flag to prevent concurrent refreshes
-        self._last_selected_message = None  # Track the last selected message
+        self._refresh_running: bool = False
+        self._last_selected_message: Optional[Dict[str, Any]] = None
+        self._initialized: bool = False
+        # UI elements
+        self.email_list: Optional[ft.Container] = None
+        self.start_button: Optional[ft.ElevatedButton] = None
+        self.status_text: Optional[ft.Text] = None
+        self.config_display: Optional[ft.Container] = None
+        self.port_notification: Optional[ft.Text] = None
         logger.info("EmailTestingApp initialized")
+
+    def initialize_server(self) -> None:
+        """Initialize the email server if not already initialized."""
+        if self.email_server is None:
+            logger.info("Initializing email server...")
+            self.email_server = EmailServer()
+            logger.info("Email server initialized")
 
     def _create_html_file(self, content: str, message_id: int) -> str:
         """Create a temporary HTML file with the email content."""
@@ -119,7 +135,15 @@ class EmailTestingApp:
         return on_hover
 
     def main(self, page: ft.Page):
+        """Main application window."""
+        if self._initialized:
+            logger.warning("Application already initialized, skipping...")
+            return
+
         logger.info("Starting EmailTestingApp main window")
+        self._initialized = True
+
+        # Set up the page
         page.title = "Local Email Testing Server"
         page.theme_mode = ft.ThemeMode.DARK
         page.theme = ft.Theme(font_family="Poppins")
@@ -127,6 +151,9 @@ class EmailTestingApp:
         page.window.resizable = True
         page.padding = 20
         page.bgcolor = "#1a1a1a"
+
+        # Initialize server
+        self.initialize_server()
 
         # Server status and controls
 
@@ -425,245 +452,275 @@ class EmailTestingApp:
                 logger.error(f"Error during auto-refresh: {str(e)}")
                 break
 
-    def toggle_server(self, e):
+    def toggle_server(
+        self, e: Optional[Union[ft.ControlEvent, Exception]] = None
+    ) -> None:
+        """Toggle the email server on/off."""
+        if not self.start_button:
+            return
+
         self.start_button.disabled = True
-        if self.email_server.is_running():
-            logger.info("Stopping email server")
-            self.email_server.stop()
-            self.status_text.value = "Server Status: Stopped"
-            self.status_text.color = "red"
-            self.start_button.text = "Start Server"
-            self.start_button.style = ft.ButtonStyle(
-                color=ft.Colors.WHITE,
-                bgcolor=ft.Colors.GREEN_700,
-                shape=ft.RoundedRectangleBorder(radius=8),
-            )
-            self.start_button.on_hover = self.apply_hover_style(
-                button=self.start_button,
-                hover_color=ft.Colors.GREEN_500,
-                default_color=ft.Colors.GREEN_700,
-            )
-            self.config_display.content = ft.Row(
-                [ft.Text("Server not running", color=ft.Colors.GREY_400)]
-            )
-            self.port_notification.visible = False
-        else:
-            try:
-                logger.info("Starting email server")
-                self.email_server = EmailServer()  # Create new server instance
-                self.email_server.start()
-                self.status_text.value = "Server Status: Running"
-                self.status_text.color = "green"
-                self.start_button.text = "Stop Server"
-                self.start_button.style = ft.ButtonStyle(
-                    color=ft.Colors.WHITE,
-                    bgcolor=ft.Colors.RED_700,
-                    shape=ft.RoundedRectangleBorder(radius=8),
-                )
-                self.start_button.on_hover = self.apply_hover_style(
-                    button=self.start_button,
-                    hover_color=ft.Colors.RED_500,
-                    default_color=ft.Colors.RED_700,
-                )
-                config = self.email_server.get_config()
+        if not self.email_server:
+            self.initialize_server()
 
-                # Format configuration display
-                config_text = ft.Row(
-                    [
-                        ft.Text(f"Host: {config['host']}", color=ft.Colors.WHITE),
-                        ft.Text(f"Port: {config['port']}", color=ft.Colors.WHITE),
-                        ft.Text(
-                            "No Authentication Required",
-                            color=ft.Colors.WHITE,
-                        ),
-                        ft.Text("TLS: Disabled", color=ft.Colors.WHITE),
-                        self.total_messages,
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                )
-                self.config_display.content = config_text
+        if not self.email_server:  # Double check after initialization
+            logger.error("Failed to initialize email server")
+            return
 
-                # Show port change notification if port is different from default
-                if config["port"] != 1025:
-                    self.port_notification.value = (
-                        f"Note: Using port {config['port']} as port 1025 was in use"
+        try:
+            if self.email_server.is_running():
+                logger.info("Stopping email server")
+                self.email_server.stop()
+                if self.status_text:
+                    self.status_text.value = "Server Status: Stopped"
+                    self.status_text.color = "red"
+                if self.start_button:
+                    self.start_button.text = "Start Server"
+                    self.start_button.style = ft.ButtonStyle(
+                        color=ft.Colors.WHITE,
+                        bgcolor=ft.Colors.GREEN_700,
+                        shape=ft.RoundedRectangleBorder(radius=8),
                     )
-                    self.port_notification.visible = True
-                    logger.info(f"Using alternative port: {config['port']}")
-                else:
+                    self.start_button.on_hover = self.apply_hover_style(
+                        button=self.start_button,
+                        hover_color=ft.Colors.GREEN_500,
+                        default_color=ft.Colors.GREEN_700,
+                    )
+                if self.config_display:
+                    self.config_display.content = ft.Row(
+                        [ft.Text("Server not running", color=ft.Colors.GREY_400)]
+                    )
+                if self.port_notification:
                     self.port_notification.visible = False
-            except OSError as error:
-                logger.exception(f"Failed to start server: {str(error)}")
-                self.status_text.value = f"Server Error: {str(error)}"
+            else:
+                logger.info("Starting email server")
+                self.email_server.start()
+                if self.status_text:
+                    self.status_text.value = "Server Status: Running"
+                    self.status_text.color = "green"
+                if self.start_button:
+                    self.start_button.text = "Stop Server"
+                    self.start_button.style = ft.ButtonStyle(
+                        color=ft.Colors.WHITE,
+                        bgcolor=ft.Colors.RED_700,
+                        shape=ft.RoundedRectangleBorder(radius=8),
+                    )
+                    self.start_button.on_hover = self.apply_hover_style(
+                        button=self.start_button,
+                        hover_color=ft.Colors.RED_500,
+                        default_color=ft.Colors.RED_700,
+                    )
+                if self.email_server and self.config_display:
+                    config = self.email_server.get_config()
+                    # Format configuration display
+                    config_text = ft.Row(
+                        [
+                            ft.Text(f"Host: {config['host']}", color=ft.Colors.WHITE),
+                            ft.Text(f"Port: {config['port']}", color=ft.Colors.WHITE),
+                            ft.Text(
+                                "No Authentication Required",
+                                color=ft.Colors.WHITE,
+                            ),
+                            ft.Text("TLS: Disabled", color=ft.Colors.WHITE),
+                            self.total_messages,
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    )
+                    self.config_display.content = config_text
+
+                    # Show port change notification if port is different from default
+                    if self.port_notification:
+                        if config["port"] != 1025:
+                            self.port_notification.value = f"Note: Using port {config['port']} as port 1025 was in use"
+                            self.port_notification.visible = True
+                            logger.info(f"Using alternative port: {config['port']}")
+                        else:
+                            self.port_notification.visible = False
+        except Exception as e:
+            logger.error(f"Error toggling server: {str(e)}")
+            if self.status_text:
+                self.status_text.value = f"Server Error: {str(e)}"
                 self.status_text.color = "red"
+            if self.port_notification:
                 self.port_notification.visible = False
+        finally:
+            # Update all UI elements
+            if self.status_text:
+                self.status_text.update()
+            if self.start_button:
+                self.start_button.update()
+            if self.config_display:
+                self.config_display.update()
+            if self.port_notification:
+                self.port_notification.update()
+            self.refresh_emails(None)
+            if self.start_button:
+                self.start_button.disabled = False
 
-        # Update all UI elements
-        self.status_text.update()
-        self.start_button.update()
-        self.config_display.update()
-        self.port_notification.update()
-        self.refresh_emails(e)
-        self.start_button.disabled = False
-
-    def refresh_emails(self, e):
-        if not self.email_server.is_running() or self._refresh_running:
+    def refresh_emails(
+        self, e: Optional[Union[ft.ControlEvent, Exception]] = None
+    ) -> None:
+        """Refresh the email list."""
+        if (
+            not self.email_server
+            or not self.email_server.is_running()
+            or self._refresh_running
+        ):
             return
 
         try:
             self._refresh_running = True
-            new_messages = self.email_server.handler.get_messages()
-            new_read_count = len(self.read_messages)
+            if self.email_server and self.email_server.handler:
+                new_messages = self.email_server.handler.get_messages()
+                new_read_count = len(self.read_messages)
 
-            # Only update if there are actual changes
-            if (
-                len(new_messages) != self.last_message_count
-                or new_read_count != self.last_read_count
-                or any(
-                    new_msg["id"] != old_msg["id"]
-                    for new_msg, old_msg in zip(new_messages, self.messages)
-                )
-                or (
-                    (self.selected_message is None)
-                    != (self._last_selected_message is None)
+                # Only update if there are actual changes
+                if (
+                    len(new_messages) != self.last_message_count
+                    or new_read_count != self.last_read_count
+                    or any(
+                        new_msg["id"] != old_msg["id"]
+                        for new_msg, old_msg in zip(new_messages, self.messages)
+                    )
                     or (
-                        self.selected_message is not None
-                        and self._last_selected_message is not None
-                        and self.selected_message["id"]
-                        != self._last_selected_message["id"]
-                    )
-                )
-            ):
-                self.messages = new_messages
-                self.last_message_count = len(new_messages)
-                self.last_read_count = new_read_count
-                self._last_selected_message = (
-                    self.selected_message
-                )  # Store the current selected message
-
-                # Update message counts
-                self.total_messages.value = f"Total Messages: {len(self.messages)}"
-                self.message_read_info.value = (
-                    f"{new_read_count} / {len(self.messages)}"
-                )
-
-                # Clear and update email list only if needed
-                if hasattr(self.email_list.content, "controls"):
-                    # Store current scroll position
-                    current_scroll = getattr(
-                        self.email_list.content, "scroll_offset", 0
-                    )
-
-                    # Pre-allocate list for better performance
-                    controls = []
-                    logger.info(
-                        self.selected_message["id"]
-                        if self.selected_message
-                        else "No selected message"
-                    )
-                    for msg in self.messages:
-                        is_read = msg["id"] in self.read_messages
-                        is_selected = (
+                        (self.selected_message is None)
+                        != (self._last_selected_message is None)
+                        or (
                             self.selected_message is not None
-                            and msg["id"] == self.selected_message["id"]
+                            and self._last_selected_message is not None
+                            and self.selected_message["id"]
+                            != self._last_selected_message["id"]
                         )
-                        if is_selected:
-                            border_color = ft.Colors.WHITE
-                        else:
-                            border_color = ft.Colors.TRANSPARENT
-                        if is_read:
-                            bg_color = ft.Colors.BLUE_900
-                        else:
-                            bg_color = ft.Colors.BLUE_800
-                        controls.append(
-                            ft.Card(
-                                content=ft.Container(
-                                    content=ft.Row(
-                                        [
-                                            ft.Icon(
-                                                name=(
-                                                    ft.Icons.MARK_EMAIL_READ
-                                                    if is_read
-                                                    else ft.Icons.MARK_EMAIL_UNREAD
-                                                ),
-                                                color=(
-                                                    ft.Colors.BLUE_200
-                                                    if is_read
-                                                    else ft.Colors.WHITE
-                                                ),
-                                                size=20,
-                                            ),
-                                            ft.Column(
+                    )
+                ):
+                    self.messages = new_messages
+                    self.last_message_count = len(new_messages)
+                    self.last_read_count = new_read_count
+                    self._last_selected_message = self.selected_message
+
+                    # Update message counts
+                    self.total_messages.value = f"Total Messages: {len(self.messages)}"
+                    self.message_read_info.value = (
+                        f"{new_read_count} / {len(self.messages)}"
+                    )
+
+                    # Clear and update email list only if needed
+                    if self.email_list and hasattr(self.email_list, "content"):
+                        content = cast(ft.Container, self.email_list.content)
+                        if hasattr(content, "controls"):
+                            # Store current scroll position
+                            current_scroll = getattr(content, "scroll_offset", 0)
+
+                            # Pre-allocate list for better performance
+                            controls = []
+                            logger.info(
+                                self.selected_message["id"]
+                                if self.selected_message
+                                else "No selected message"
+                            )
+                            for msg in self.messages:
+                                is_read = msg["id"] in self.read_messages
+                                is_selected = (
+                                    self.selected_message is not None
+                                    and msg["id"] == self.selected_message["id"]
+                                )
+                                if is_selected:
+                                    border_color = ft.Colors.WHITE
+                                else:
+                                    border_color = ft.Colors.TRANSPARENT
+                                if is_read:
+                                    bg_color = ft.Colors.BLUE_900
+                                else:
+                                    bg_color = ft.Colors.BLUE_800
+                                controls.append(
+                                    ft.Card(
+                                        content=ft.Container(
+                                            content=ft.Row(
                                                 [
-                                                    ft.Text(
-                                                        f"From: {msg['from']}",
-                                                        weight=ft.FontWeight.BOLD,
+                                                    ft.Icon(
+                                                        name=(
+                                                            ft.Icons.MARK_EMAIL_READ
+                                                            if is_read
+                                                            else ft.Icons.MARK_EMAIL_UNREAD
+                                                        ),
                                                         color=(
                                                             ft.Colors.BLUE_200
                                                             if is_read
                                                             else ft.Colors.WHITE
                                                         ),
-                                                        max_lines=1,
-                                                        overflow=ft.TextOverflow.ELLIPSIS,
-                                                        expand=1,
+                                                        size=20,
                                                     ),
-                                                    ft.Text(
-                                                        f"Subject: {msg['subject']}",
-                                                        color=(
-                                                            ft.Colors.BLUE_200
-                                                            if is_read
-                                                            else ft.Colors.WHITE
-                                                        ),
-                                                        max_lines=1,
-                                                        overflow=ft.TextOverflow.ELLIPSIS,
-                                                        expand=1,
-                                                    ),
-                                                    ft.Text(
-                                                        f"Date: {msg['date']}",
-                                                        color=ft.Colors.GREY_400,
-                                                        size=12,
-                                                        max_lines=1,
-                                                        overflow=ft.TextOverflow.ELLIPSIS,
-                                                        expand=1,
+                                                    ft.Column(
+                                                        [
+                                                            ft.Text(
+                                                                f"From: {msg['from']}",
+                                                                weight=ft.FontWeight.BOLD,
+                                                                color=(
+                                                                    ft.Colors.BLUE_200
+                                                                    if is_read
+                                                                    else ft.Colors.WHITE
+                                                                ),
+                                                                max_lines=1,
+                                                                overflow=ft.TextOverflow.ELLIPSIS,
+                                                                expand=1,
+                                                            ),
+                                                            ft.Text(
+                                                                f"Subject: {msg['subject']}",
+                                                                color=(
+                                                                    ft.Colors.BLUE_200
+                                                                    if is_read
+                                                                    else ft.Colors.WHITE
+                                                                ),
+                                                                max_lines=1,
+                                                                overflow=ft.TextOverflow.ELLIPSIS,
+                                                                expand=1,
+                                                            ),
+                                                            ft.Text(
+                                                                f"Date: {msg['date']}",
+                                                                color=ft.Colors.GREY_400,
+                                                                size=12,
+                                                                max_lines=1,
+                                                                overflow=ft.TextOverflow.ELLIPSIS,
+                                                                expand=1,
+                                                            ),
+                                                        ],
+                                                        spacing=5,
+                                                        expand=True,
                                                     ),
                                                 ],
-                                                spacing=5,
-                                                expand=True,
+                                                spacing=10,
+                                                tight=True,
                                             ),
-                                        ],
-                                        spacing=10,
-                                        tight=True,
-                                    ),
-                                    width=380,
-                                    padding=10,
-                                    bgcolor=bg_color,
-                                    border=ft.border.all(
-                                        width=2,
-                                        color=border_color,
-                                    ),
-                                    border_radius=8,
-                                    on_click=lambda e, m=msg: self.show_email_details(
-                                        m
-                                    ),
-                                ),
-                                elevation=3 if is_selected else 1,
-                            )
-                        )
+                                            width=380,
+                                            padding=10,
+                                            bgcolor=bg_color,
+                                            border=ft.border.all(
+                                                width=2,
+                                                color=border_color,
+                                            ),
+                                            border_radius=8,
+                                            on_click=lambda e, m=msg: self.show_email_details(
+                                                m
+                                            ),
+                                        ),
+                                        elevation=3 if is_selected else 1,
+                                    )
+                                )
 
-                    # Batch update controls
-                    self.email_list.content.controls.clear()
-                    self.email_list.content.controls.extend(controls)
+                            # Batch update controls
+                            content.controls.clear()
+                            content.controls.extend(controls)
 
-                    # Restore scroll position if possible
-                    try:
-                        self.email_list.content.scroll_offset = current_scroll
-                    except:
-                        pass
+                            # Restore scroll position if possible
+                            try:
+                                content.scroll_offset = current_scroll
+                            except:
+                                pass
 
-                    # Batch update UI
-                    self.email_list.update()
-                    self.total_messages.update()
-                    self.message_read_info.update()
+                            # Batch update UI
+                            self.email_list.update()
+                            self.total_messages.update()
+                            self.message_read_info.update()
 
         except Exception as e:
             logger.error(f"Error refreshing emails: {str(e)}")
@@ -791,6 +848,7 @@ class EmailTestingApp:
 
 
 def main():
+    """Main entry point for the application."""
     try:
         logger.info("Starting Email Testing Server application")
         app = EmailTestingApp()

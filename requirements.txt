@@ -129,6 +129,9 @@ pyparsing==3.1.1
 pyperclip==1.9.0
 pypng==0.20220715.0
 pyproject_hooks==1.0.0
+PyQt6==6.9.0
+PyQt6-Qt6==6.9.0
+PyQt6_sip==13.10.2
 pyrsistent==0.20.0
 pyserial==3.5
 python-apt==2.7.7+ubuntu4
