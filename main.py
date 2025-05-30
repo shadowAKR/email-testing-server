@@ -34,6 +34,7 @@ class EmailTestingApp:
             size=14,
         )
         self._refresh_running = False  # Flag to prevent concurrent refreshes
+        self._last_selected_message = None  # Track the last selected message
         logger.info("EmailTestingApp initialized")
 
     def _create_html_file(self, content: str, message_id: int) -> str:
@@ -522,11 +523,23 @@ class EmailTestingApp:
                     new_msg["id"] != old_msg["id"]
                     for new_msg, old_msg in zip(new_messages, self.messages)
                 )
+                or (
+                    (self.selected_message is None)
+                    != (self._last_selected_message is None)
+                    or (
+                        self.selected_message is not None
+                        and self._last_selected_message is not None
+                        and self.selected_message["id"]
+                        != self._last_selected_message["id"]
+                    )
+                )
             ):
-
                 self.messages = new_messages
                 self.last_message_count = len(new_messages)
                 self.last_read_count = new_read_count
+                self._last_selected_message = (
+                    self.selected_message
+                )  # Store the current selected message
 
                 # Update message counts
                 self.total_messages.value = f"Total Messages: {len(self.messages)}"
@@ -543,8 +556,25 @@ class EmailTestingApp:
 
                     # Pre-allocate list for better performance
                     controls = []
+                    logger.info(
+                        self.selected_message["id"]
+                        if self.selected_message
+                        else "No selected message"
+                    )
                     for msg in self.messages:
                         is_read = msg["id"] in self.read_messages
+                        is_selected = (
+                            self.selected_message is not None
+                            and msg["id"] == self.selected_message["id"]
+                        )
+                        if is_selected:
+                            border_color = ft.Colors.WHITE
+                        else:
+                            border_color = ft.Colors.TRANSPARENT
+                        if is_read:
+                            bg_color = ft.Colors.BLUE_900
+                        else:
+                            bg_color = ft.Colors.BLUE_800
                         controls.append(
                             ft.Card(
                                 content=ft.Container(
@@ -606,15 +636,17 @@ class EmailTestingApp:
                                     ),
                                     width=380,
                                     padding=10,
+                                    bgcolor=bg_color,
+                                    border=ft.border.all(
+                                        width=2,
+                                        color=border_color,
+                                    ),
+                                    border_radius=8,
                                     on_click=lambda e, m=msg: self.show_email_details(
                                         m
                                     ),
                                 ),
-                                color=(
-                                    ft.Colors.BLUE_900
-                                    if is_read
-                                    else ft.Colors.BLUE_800
-                                ),
+                                elevation=3 if is_selected else 1,
                             )
                         )
 
