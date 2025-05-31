@@ -14,12 +14,12 @@ from datetime import datetime
 import stat
 
 # Build configuration
-APP_NAME = "EmailTestingServer"
+APP_NAME = "email-testing-server"
 VERSION = "1.0.0"
 AUTHOR = "Ananthu Krishnan <dev.ananthu.krishnan@gmail.com>"
 DESCRIPTION = "Local Email Testing Server - A desktop application for testing email functionality locally"
 MAINTAINER = "Ananthu Krishnan"
-PACKAGE_NAME = "emailtestingserver"
+PACKAGE_NAME = "email-testing-server"
 SECTION = "net"
 PRIORITY = "optional"
 ARCHITECTURE = "amd64"
@@ -207,8 +207,21 @@ def build_executable():
     clean_build_dirs()
     python_exe, pip_exe = setup_virtual_env()
     install_dependencies(python_exe, pip_exe)
+
+    # Ensure icons exist
     if not os.path.exists(ICON_NAME):
-        create_default_icon()
+        raise RuntimeError(f"Icon file {ICON_NAME} not found in assets directory")
+
+    # Copy icons to build directory for PyInstaller
+    build_assets_dir = os.path.join("build", "assets")
+    os.makedirs(build_assets_dir, exist_ok=True)
+    shutil.copy2(ICON_NAME, os.path.join(build_assets_dir, os.path.basename(ICON_NAME)))
+    # Also copy the other icon format for cross-platform support
+    other_icon = "assets/icon.png" if IS_WINDOWS else "assets/icon.ico"
+    shutil.copy2(
+        other_icon, os.path.join(build_assets_dir, os.path.basename(other_icon))
+    )
+
     version_file = create_version_file() if IS_WINDOWS else None
 
     # Collect all required Flet components
@@ -241,7 +254,9 @@ def build_executable():
         "--icon",
         ICON_NAME,
         "--add-data",
-        f"assets{os.pathsep}assets",
+        f"assets{os.pathsep}assets",  # Add entire assets directory
+        "--add-data",
+        f"build/assets{os.pathsep}assets",  # Add build assets directory
         "--collect-all",
         "aiosmtpd",
         "--collect-all",
@@ -497,17 +512,22 @@ def create_deb_package():
     """Create a Debian package (.deb) for the application."""
     print("\nCreating Debian package...")
 
-    # Create package directory structure
-    package_dir = f"{PACKAGE_NAME}_{VERSION}_{ARCHITECTURE}"
-    if os.path.exists(package_dir):
-        shutil.rmtree(package_dir)
+    try:
+        # Ensure icons exist
+        if not os.path.exists(ICON_NAME):
+            raise RuntimeError(f"Icon file {ICON_NAME} not found in assets directory")
 
-    # Create DEBIAN directory
-    debian_dir = os.path.join(package_dir, "DEBIAN")
-    os.makedirs(debian_dir, exist_ok=True)
+        # Create package directory structure
+        package_dir = f"{PACKAGE_NAME}_{VERSION}_{ARCHITECTURE}"
+        if os.path.exists(package_dir):
+            shutil.rmtree(package_dir)
 
-    # Create control file
-    control_content = f"""Package: {PACKAGE_NAME}
+        # Create DEBIAN directory
+        debian_dir = os.path.join(package_dir, "DEBIAN")
+        os.makedirs(debian_dir, exist_ok=True)
+
+        # Create control file
+        control_content = f"""Package: {PACKAGE_NAME}
 Version: {VERSION}
 Section: {SECTION}
 Priority: {PRIORITY}
@@ -519,46 +539,54 @@ Description: {DESCRIPTION}
  It provides a local SMTP server and a user interface to monitor emails.
 """
 
-    with open(os.path.join(debian_dir, "control"), "w") as f:
-        f.write(control_content)
+        with open(os.path.join(debian_dir, "control"), "w") as f:
+            f.write(control_content)
 
-    # Create postinst script
-    postinst_content = """#!/bin/bash
+        # Create postinst script with proper icon cache update
+        postinst_content = """#!/bin/bash
 set -e
 # Update desktop database
-update-desktop-database
-# Update icon cache
-gtk-update-icon-cache -f -t /usr/share/icons/hicolor
+update-desktop-database || true
+# Update icon cache for all icon sizes
+for size in 16 24 32 48 64 128 256; do
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor/${size}x${size} || true
+done
+# Update icon cache for hicolor
+gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
 """
 
-    with open(os.path.join(debian_dir, "postinst"), "w") as f:
-        f.write(postinst_content)
-    os.chmod(
-        os.path.join(debian_dir, "postinst"),
-        stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
-    )
+        with open(os.path.join(debian_dir, "postinst"), "w") as f:
+            f.write(postinst_content)
+        os.chmod(
+            os.path.join(debian_dir, "postinst"),
+            stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
+        )
 
-    # Create prerm script
-    prerm_content = """#!/bin/bash
+        # Create prerm script
+        prerm_content = """#!/bin/bash
 set -e
 # Update desktop database
-update-desktop-database
-# Update icon cache
-gtk-update-icon-cache -f -t /usr/share/icons/hicolor
+update-desktop-database || true
+# Update icon cache for all icon sizes
+for size in 16 24 32 48 64 128 256; do
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor/${size}x${size} || true
+done
+# Update icon cache for hicolor
+gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
 """
 
-    with open(os.path.join(debian_dir, "prerm"), "w") as f:
-        f.write(prerm_content)
-    os.chmod(
-        os.path.join(debian_dir, "prerm"),
-        stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
-    )
+        with open(os.path.join(debian_dir, "prerm"), "w") as f:
+            f.write(prerm_content)
+        os.chmod(
+            os.path.join(debian_dir, "prerm"),
+            stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
+        )
 
-    # Create desktop entry
-    desktop_dir = os.path.join(package_dir, "usr", "share", "applications")
-    os.makedirs(desktop_dir, exist_ok=True)
+        # Create desktop entry with proper icon path
+        desktop_dir = os.path.join(package_dir, "usr", "share", "applications")
+        os.makedirs(desktop_dir, exist_ok=True)
 
-    desktop_content = f"""[Desktop Entry]
+        desktop_content = f"""[Desktop Entry]
 Version=1.0
 Type=Application
 Name=Email Testing Server
@@ -567,40 +595,54 @@ Exec=/usr/bin/{APP_NAME}
 Icon={APP_NAME}
 Terminal=false
 Categories=Network;Email;
+StartupWMClass={APP_NAME}
+StartupNotify=true
 """
 
-    with open(os.path.join(desktop_dir, f"{PACKAGE_NAME}.desktop"), "w") as f:
-        f.write(desktop_content)
+        with open(os.path.join(desktop_dir, f"{PACKAGE_NAME}.desktop"), "w") as f:
+            f.write(desktop_content)
 
-    # Create icon directory and copy icon
-    icon_dir = os.path.join(
-        package_dir, "usr", "share", "icons", "hicolor", "256x256", "apps"
-    )
-    os.makedirs(icon_dir, exist_ok=True)
-    shutil.copy2(ICON_NAME, os.path.join(icon_dir, f"{APP_NAME}.png"))
+        # Create icon directories and copy icon to all standard sizes
+        icon_sizes = [16, 24, 32, 48, 64, 128, 256]
+        for size in icon_sizes:
+            icon_dir = os.path.join(
+                package_dir,
+                "usr",
+                "share",
+                "icons",
+                "hicolor",
+                f"{size}x{size}",
+                "apps",
+            )
+            os.makedirs(icon_dir, exist_ok=True)
+            shutil.copy2(ICON_NAME, os.path.join(icon_dir, f"{APP_NAME}.png"))
 
-    # Create binary directory and copy executable
-    bin_dir = os.path.join(package_dir, "usr", "bin")
-    os.makedirs(bin_dir, exist_ok=True)
-    shutil.copy2(os.path.join("dist", APP_NAME), os.path.join(bin_dir, APP_NAME))
-    os.chmod(
-        os.path.join(bin_dir, APP_NAME),
-        stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
-    )
+        # Create binary directory and copy executable
+        bin_dir = os.path.join(package_dir, "usr", "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        shutil.copy2(os.path.join("dist", APP_NAME), os.path.join(bin_dir, APP_NAME))
+        os.chmod(
+            os.path.join(bin_dir, APP_NAME),
+            stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
+        )
 
-    # Build the package
-    deb_file = f"{PACKAGE_NAME}_{VERSION}_{ARCHITECTURE}.deb"
-    if os.path.exists(deb_file):
-        os.remove(deb_file)
+        # Build the package
+        deb_file = f"{PACKAGE_NAME}_{VERSION}_{ARCHITECTURE}.deb"
+        if os.path.exists(deb_file):
+            os.remove(deb_file)
 
-    print(f"Building {deb_file}...")
-    subprocess.run(["dpkg-deb", "--build", package_dir], check=True)
+        print(f"Building {deb_file}...")
+        subprocess.run(["dpkg-deb", "--build", package_dir], check=True)
 
-    # Clean up
-    shutil.rmtree(package_dir)
+        # Clean up
+        shutil.rmtree(package_dir)
 
-    print(f"\nDebian package created successfully: {deb_file}")
-    return deb_file
+        print(f"\nDebian package created successfully: {deb_file}")
+        return deb_file
+
+    except Exception as e:
+        print(f"Error creating Debian package: {e}")
+        raise
 
 
 def build_all():
