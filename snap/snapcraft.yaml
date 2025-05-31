@@ -1,0 +1,35 @@
+name: email-testing-server
+version: '1.0.0'
+summary: Email Testing Server
+description: A cross-platform desktop application to test emails locally.
+
+grade: stable
+confinement: strict
+base: core24
+
+apps:
+  email-testing-server:
+    command: email-testing-server
+    plugs: [network, network-bind, desktop, audio-playback, x11, wayland]
+    desktop: meta/gui/email-testing-server.desktop  # path inside snap
+
+parts:
+  email-testing-server:
+    plugin: dump
+    source: dist/
+    stage:
+      - email-testing-server
+      - email-testing-server.desktop
+      - icons/email-testing-server.png
+    organize:
+      email-testing-server.desktop: meta/gui/email-testing-server.desktop
+      icons/email-testing-server.png: meta/gui/email-testing-server.png
+    stage-packages:
+      - libgstreamer1.0-0
+      - libgstreamer-plugins-base1.0-0
+      - libgstreamer-plugins-good1.0-0
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-libav
+      - libglib2.0-0
+      - libgtk-3-0
