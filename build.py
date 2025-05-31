@@ -14,7 +14,7 @@ from datetime import datetime
 import stat
 
 # Build configuration
-APP_NAME = "EmailTestingServer"
+APP_NAME = "emailtestingserver"
 VERSION = "1.0.0"
 AUTHOR = "Ananthu Krishnan <dev.ananthu.krishnan@gmail.com>"
 DESCRIPTION = "Local Email Testing Server - A desktop application for testing email functionality locally"
