@@ -27,6 +27,8 @@ class EmailTestingApp:
         self.messages: List[Dict[str, Any]] = []
         self.last_message_count: int = 0
         self.last_read_count: int = 0
+        self._page: Optional[ft.Page] = None  # Store page reference
+        self._cleanup_complete = False  # Track cleanup status
         self.total_messages: ft.Text = ft.Text(
             f"Total Messages: {len(self.messages)}",
             color=ft.Colors.WHITE,
@@ -135,6 +137,52 @@ class EmailTestingApp:
 
         return on_hover
 
+    def cleanup(self):
+        """Clean up resources before application shutdown."""
+        if self._cleanup_complete:
+            return
+
+        try:
+            logger.info("Starting application cleanup...")
+
+            # Stop the email server if running
+            if self.email_server:
+                try:
+                    if self.email_server.is_running():
+                        logger.info("Stopping email server during cleanup...")
+                        self.email_server.stop()
+                        # Wait a bit to ensure server is fully stopped
+                        time.sleep(0.5)
+                    # Clear server reference
+                    self.email_server = None
+                except Exception as e:
+                    logger.error(f"Error stopping email server: {str(e)}")
+
+            # Clear any temporary files
+            if self.temp_dir.exists():
+                for file in self.temp_dir.glob("email_*.html"):
+                    try:
+                        file.unlink()
+                    except Exception as e:
+                        logger.error(f"Error deleting file {file}: {str(e)}")
+                try:
+                    self.temp_dir.rmdir()
+                except Exception as e:
+                    logger.error(f"Error removing temp directory: {str(e)}")
+
+            # Clear any UI state
+            self._refresh_running = True
+            self.messages.clear()
+            self.read_messages.clear()
+            self.selected_message = None
+
+            logger.info("Application cleanup completed successfully")
+
+        except Exception as e:
+            logger.error(f"Error during application cleanup: {str(e)}")
+        finally:
+            self._cleanup_complete = True
+
     def main(self, page: ft.Page):
         """Main application window."""
         if self._initialized:
@@ -143,6 +191,51 @@ class EmailTestingApp:
 
         logger.info("Starting EmailTestingApp main window")
         self._initialized = True
+        self._page = page  # Store page reference
+
+        # Create loading dialog
+        loading_dialog = ft.AlertDialog(
+            modal=True,
+            content=ft.Column(
+                [
+                    ft.ProgressRing(width=20, height=20, stroke_width=2),
+                    ft.Text("Cleaning up resources...", color=ft.Colors.WHITE),
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                alignment=ft.MainAxisAlignment.CENTER,
+                spacing=10,
+                height=100,
+                width=200,
+            ),
+            actions_alignment=ft.MainAxisAlignment.CENTER,
+        )
+
+        def handle_window_event(e: ft.WindowEvent):
+            if e.data == "close":
+                try:
+                    logger.info("Page close event received")
+                    # Show loading dialog
+                    page.add(loading_dialog)
+                    loading_dialog.open = True
+                    page.update()
+
+                    # Perform cleanup
+                    self.cleanup()
+
+                except Exception as ex:
+                    logger.error(f"Error during page close: {str(ex)}")
+                finally:
+                    # Close loading dialog
+                    loading_dialog.open = False
+                    page.update()
+
+                    # Allow window to close
+                    page.window.prevent_close = False
+                    page.window.close()
+
+        # Register window event handler
+        page.window.on_event = handle_window_event
+        page.window.prevent_close = True
 
         # Set up the page
         page.title = "Email Testing Server"
@@ -153,8 +246,7 @@ class EmailTestingApp:
         page.padding = 20
         page.bgcolor = "#1a1a1a"
         icon_path = "icon.ico" if platform.system() == "Windows" else "icon.png"
-        page.window_icon = icon_path
-        page.icon = icon_path
+        page.window.icon = icon_path
 
         # Initialize server
         self.initialize_server()
