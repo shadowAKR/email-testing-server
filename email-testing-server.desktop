@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Email Testing Server
+Exec=email-testing-server
+Icon=${SNAP}/meta/gui/email-testing-server.png
+Type=Application
+Terminal=false
+Categories=Network;Email;Development;
+StartupWMClass=email-testing-server
+StartupNotify=true
