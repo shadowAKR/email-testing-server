@@ -436,6 +436,30 @@ class EmailTestingApp:
                                                 expand=True,
                                             ),
                                         ),
+                                        ft.Tab(
+                                            text="Attachments",
+                                            content=ft.Container(
+                                                content=ft.Column(
+                                                    [
+                                                        ft.Text(
+                                                            "No attachments",
+                                                            color=ft.Colors.GREY_400,
+                                                            visible=True,
+                                                        ),
+                                                        ft.ListView(
+                                                            spacing=10,
+                                                            padding=10,
+                                                            expand=True,
+                                                        ),
+                                                    ],
+                                                    spacing=10,
+                                                ),
+                                                bgcolor=ft.Colors.BLACK45,
+                                                border_radius=8,
+                                                padding=10,
+                                                expand=True,
+                                            ),
+                                        ),
                                     ],
                                     expand=True,
                                 ),
@@ -876,6 +900,74 @@ class EmailTestingApp:
             # Update plain text view
             content_tabs.tabs[1].content.value = message["body"]
 
+            # Update attachments view
+            attachments_container = content_tabs.tabs[2].content
+            attachments_list = attachments_container.content.controls[1]
+            no_attachments_text = attachments_container.content.controls[0]
+
+            if message.get("attachments"):
+                no_attachments_text.visible = False
+                attachments_list.controls.clear()
+                
+                for attachment in message["attachments"]:
+                    # Format file size
+                    size = attachment["size"]
+                    if size < 1024:
+                        size_str = f"{size} B"
+                    elif size < 1024 * 1024:
+                        size_str = f"{size/1024:.1f} KB"
+                    else:
+                        size_str = f"{size/(1024*1024):.1f} MB"
+
+                    # Create attachment card
+                    attachment_card = ft.Card(
+                        content=ft.Container(
+                            content=ft.Row(
+                                [
+                                    ft.Icon(
+                                        name=self._get_file_icon(attachment["content_type"]),
+                                        color=ft.Colors.BLUE_200,
+                                        size=24,
+                                    ),
+                                    ft.Column(
+                                        [
+                                            ft.Text(
+                                                attachment["filename"],
+                                                weight=ft.FontWeight.BOLD,
+                                                color=ft.Colors.WHITE,
+                                            ),
+                                            ft.Text(
+                                                f"{attachment['content_type']} • {size_str}",
+                                                color=ft.Colors.GREY_400,
+                                                size=12,
+                                            ),
+                                        ],
+                                        spacing=5,
+                                    ),
+                                    ft.ElevatedButton(
+                                        "Download",
+                                        icon=ft.Icons.DOWNLOAD,
+                                        on_click=lambda e, a=attachment: self._download_attachment(a),
+                                        style=ft.ButtonStyle(
+                                            color=ft.Colors.WHITE,
+                                            bgcolor=ft.Colors.BLUE_700,
+                                            shape=ft.RoundedRectangleBorder(radius=8),
+                                        ),
+                                    ),
+                                ],
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            ),
+                            padding=10,
+                            bgcolor=ft.Colors.BLACK45,
+                            border_radius=8,
+                        ),
+                        elevation=1,
+                    )
+                    attachments_list.controls.append(attachment_card)
+            else:
+                no_attachments_text.visible = True
+                attachments_list.controls.clear()
+
             # Reset to first tab
             content_tabs.selected_index = 0
 
@@ -885,6 +977,76 @@ class EmailTestingApp:
             logger.info(f"Showing details for email from {message['from']}")
         except Exception as e:
             logger.error(f"Error showing email details: {str(e)}")
+
+    def _get_file_icon(self, content_type: str) -> str:
+        """Get the appropriate icon for a file type."""
+        if content_type.startswith("image/"):
+            return ft.Icons.IMAGE
+        elif content_type.startswith("video/"):
+            return ft.Icons.VIDEO_FILE
+        elif content_type.startswith("audio/"):
+            return ft.Icons.AUDIO_FILE
+        elif content_type == "application/pdf":
+            return ft.Icons.PICTURE_AS_PDF
+        elif content_type.startswith("text/"):
+            return ft.Icons.DESCRIPTION
+        elif content_type.startswith("application/"):
+            return ft.Icons.INSERT_DRIVE_FILE
+        else:
+            return ft.Icons.ATTACH_FILE
+
+    def _download_attachment(self, attachment: Dict[str, Any]):
+        """Download an attachment to the user's downloads folder."""
+        try:
+            # Get the downloads folder path in a cross-platform way
+            if platform.system() == "Windows":
+                # On Windows, use the USERPROFILE environment variable
+                downloads_path = os.path.join(os.environ["USERPROFILE"], "Downloads")
+            else:
+                # On Unix-like systems, use the home directory
+                downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+
+            # Ensure the downloads directory exists
+            os.makedirs(downloads_path, exist_ok=True)
+
+            # Create the full file path
+            file_path = os.path.join(downloads_path, attachment["filename"])
+
+            # Write the attachment data to the file
+            with open(file_path, "wb") as f:
+                f.write(attachment["data"])
+
+            logger.info(f"Attachment downloaded to {file_path}")
+            
+            # Show success notification
+            if self._page:
+                self._page.open(
+                    ft.SnackBar(
+                        content=ft.Text(f"Downloaded {attachment['filename']} to Downloads folder", color=ft.Colors.WHITE),
+                        action="OK",
+                        duration=3000,  # Show for 3 seconds
+                        bgcolor=ft.Colors.BLUE_700,
+                        shape=ft.RoundedRectangleBorder(radius=8),
+                        width=300,
+                        elevation=1,
+                    )
+                )
+                self._page.update()  # Update the page to show the snackbar
+        except Exception as e:
+            logger.error(f"Error downloading attachment: {str(e)}")
+            if self._page:
+                self._page.open(
+                    ft.SnackBar(
+                        content=ft.Text("Error downloading attachment", color=ft.Colors.WHITE),
+                        action="OK",
+                        duration=3000,  # Show for 3 seconds
+                        bgcolor=ft.Colors.RED_700,
+                        shape=ft.RoundedRectangleBorder(radius=8),
+                        width=300,
+                        elevation=1,
+                    )
+                )
+                self._page.update()  # Update the page to show the snackbar
 
     def close_email_details(self, e):
         self.email_details.visible = False
