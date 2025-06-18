@@ -34,7 +34,7 @@ class SimpleEmailHandler(AsyncMessage):
             logger.info(f"New email received from {message.get('From', '')}")
 
             # Get both plain text and HTML content
-            plain_text, html_content = self._get_content(message)
+            plain_text, html_content, attachments = self._get_content(message)
 
             # Convert message to dict format
             msg_dict = {
@@ -50,6 +50,7 @@ class SimpleEmailHandler(AsyncMessage):
                 "parsed_html": (
                     self.html_converter.handle(html_content) if html_content else None
                 ),
+                "attachments": attachments,
             }
 
             self.messages.insert(0, msg_dict)  # Add new messages at the beginning
@@ -59,10 +60,11 @@ class SimpleEmailHandler(AsyncMessage):
         except Exception as e:
             logger.error(f"Error processing email: {str(e)}")
 
-    def _get_content(self, message: Message) -> Tuple[str, Optional[str]]:
+    def _get_content(self, message: Message) -> Tuple[str, Optional[str], List[Dict[str, Any]]]:
         """Extract both plain text and HTML content from the message."""
         plain_text = ""
         html_content = None
+        attachments = []
 
         try:
             if message.is_multipart():
@@ -81,6 +83,18 @@ class SimpleEmailHandler(AsyncMessage):
                             plain_text = payload.decode()
                         else:
                             plain_text = str(payload)
+                    elif part.get_filename():  # This is an attachment
+                        filename = part.get_filename()
+                        if filename:
+                            # Get the attachment data
+                            payload = part.get_payload(decode=True)
+                            if payload:
+                                attachments.append({
+                                    "filename": filename,
+                                    "content_type": content_type,
+                                    "size": len(payload),
+                                    "data": payload
+                                })
             else:
                 # Single part message
                 payload = message.get_payload(decode=True)
@@ -101,11 +115,11 @@ class SimpleEmailHandler(AsyncMessage):
             elif not plain_text and not html_content:
                 plain_text = "Error reading email body"
 
-            return plain_text, html_content
+            return plain_text, html_content, attachments
 
         except Exception as e:
             logger.error(f"Error getting email content: {str(e)}")
-            return "Error reading email body", None
+            return "Error reading email body", None, []
 
     def get_messages(self) -> List[Dict[str, Any]]:
         return self.messages
