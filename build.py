@@ -15,7 +15,7 @@ import stat
 
 # Build configuration
 APP_NAME = "email-testing-server"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 AUTHOR = "Ananthu Krishnan <dev.ananthu.krishnan@gmail.com>"
 DESCRIPTION = "Local Email Testing Server - A desktop application for testing email functionality locally"
 MAINTAINER = "Ananthu Krishnan"
@@ -74,10 +74,10 @@ def clean_build_dirs():
 def setup_virtual_env():
     venv_dir = "env"
     if os.path.exists(venv_dir):
-        shutil.rmtree(venv_dir)
-
-    print("Creating virtual environment...")
-    subprocess.run([sys.executable, "-m", "venv", venv_dir], check=True)
+        print("Using existing virtual environment...")
+    else:
+        print("Creating virtual environment...")
+        subprocess.run([sys.executable, "-m", "venv", venv_dir], check=True)
 
     if IS_WINDOWS:
         python_exe = os.path.join(venv_dir, "Scripts", "python.exe")
