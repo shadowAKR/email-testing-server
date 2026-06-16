@@ -1,4 +1,7 @@
 import time
+import asyncio
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 import flet as ft
 from email_server import EmailServer
 import logging
@@ -14,6 +17,85 @@ from typing import Optional, List, Dict, Any, Set, Union, cast
 # Setup logging
 loggers = setup_logging()
 logger = loggers["app"]
+
+# Custom implementation of ElevatedButton to avoid deprecation warnings and restore original behavior using ft.Button under the hood.
+class ElevatedButton(ft.Button):
+    def __init__(
+        self,
+        text: str = "",
+        on_click=None,
+        icon=None,
+        style=None,
+        bgcolor=None,
+        color=ft.Colors.WHITE,
+        elevation=2,
+        padding=None,
+        radius=8,
+        **kwargs
+    ):
+        if padding is None:
+            padding = ft.Padding.symmetric(horizontal=20, vertical=15)
+        elif isinstance(padding, (int, float)):
+            padding = ft.Padding.all(padding)
+            
+        if style is None:
+            style = ft.ButtonStyle(
+                color=color,
+                bgcolor=bgcolor,
+                elevation=elevation,
+                padding=padding,
+                shape=ft.RoundedRectangleBorder(radius=radius),
+                mouse_cursor=ft.MouseCursor.CLICK,
+            )
+        else:
+            if style.color is None and color is not None:
+                style.color = color
+            if style.bgcolor is None and bgcolor is not None:
+                style.bgcolor = bgcolor
+            if style.elevation is None:
+                style.elevation = elevation
+            if style.padding is None:
+                style.padding = padding
+            if style.shape is None:
+                style.shape = ft.RoundedRectangleBorder(radius=radius)
+            if style.mouse_cursor is None:
+                style.mouse_cursor = ft.MouseCursor.CLICK
+
+        super().__init__(
+            content=text,
+            icon=icon,
+            on_click=on_click,
+            style=style,
+            **kwargs
+        )
+
+    @property
+    def style(self):
+        return self._style
+
+    @style.setter
+    def style(self, value):
+        if value is not None:
+            if getattr(value, "elevation", None) is None:
+                value.elevation = 2
+            if getattr(value, "padding", None) is None:
+                value.padding = ft.Padding.symmetric(horizontal=20, vertical=15)
+            if getattr(value, "shape", None) is None:
+                value.shape = ft.RoundedRectangleBorder(radius=8)
+            if getattr(value, "mouse_cursor", None) is None:
+                value.mouse_cursor = ft.MouseCursor.CLICK
+        self._style = value
+
+    @property
+    def text(self) -> str:
+        return self.content
+
+    @text.setter
+    def text(self, value: str):
+        self.content = value
+
+
+ft.ElevatedButton = ElevatedButton
 
 
 class EmailTestingApp:
@@ -211,7 +293,7 @@ class EmailTestingApp:
         )
 
         def handle_window_event(e: ft.WindowEvent):
-            if e.data == "close":
+            if e.type == ft.WindowEventType.CLOSE:
                 try:
                     logger.info("Page close event received")
                     # Show loading dialog
@@ -309,7 +391,7 @@ class EmailTestingApp:
         self.config_display = ft.Container(
             content=ft.Row([ft.Text("Server not running", color=ft.Colors.GREY_400)]),
             padding=10,
-            bgcolor=ft.Colors.BLACK45,
+            bgcolor=ft.Colors.BLACK_45,
             border_radius=8,
         )
         self.port_notification = ft.Text(
@@ -319,7 +401,7 @@ class EmailTestingApp:
         # Email list
         self.email_list = ft.Container(
             content=ft.ListView(spacing=10, padding=10),
-            bgcolor=ft.Colors.BLACK45,
+            bgcolor=ft.Colors.BLACK_45,
             border_radius=8,
             padding=10,
             width=400,
@@ -328,6 +410,131 @@ class EmailTestingApp:
         )
 
         # Email details view
+        # Define email detail controls for easy dynamic updates
+        self.email_from_field = ft.TextField(
+            label="From",
+            read_only=True,
+            multiline=True,
+            border_color=ft.Colors.BLUE_700,
+            bgcolor=ft.Colors.BLACK_45,
+            color=ft.Colors.WHITE,
+        )
+        self.email_to_field = ft.TextField(
+            label="To",
+            read_only=True,
+            multiline=True,
+            border_color=ft.Colors.BLUE_700,
+            bgcolor=ft.Colors.BLACK_45,
+            color=ft.Colors.WHITE,
+        )
+        self.email_subject_field = ft.TextField(
+            label="Subject",
+            read_only=True,
+            multiline=True,
+            border_color=ft.Colors.BLUE_700,
+            bgcolor=ft.Colors.BLACK_45,
+            color=ft.Colors.WHITE,
+        )
+        self.html_markdown = ft.Markdown(
+            "",
+            selectable=True,
+            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+        )
+        self.plain_text_field = ft.TextField(
+            read_only=True,
+            multiline=True,
+            border_color=ft.Colors.BLUE_700,
+            bgcolor=ft.Colors.BLACK_45,
+            color=ft.Colors.WHITE,
+            expand=True,
+        )
+        self.no_attachments_text = ft.Text(
+            "No attachments",
+            color=ft.Colors.GREY_400,
+            visible=True,
+        )
+        self.attachments_list = ft.ListView(
+            spacing=10,
+            padding=10,
+            expand=True,
+        )
+
+        tab_bar = ft.TabBar(
+            tabs=[
+                ft.Tab(label="HTML View"),
+                ft.Tab(label="Plain Text"),
+                ft.Tab(label="Attachments"),
+            ]
+        )
+
+        tab_bar_view = ft.TabBarView(
+            expand=True,
+            controls=[
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.ElevatedButton(
+                                        "Open in Browser",
+                                        icon=ft.Icons.LAUNCH,
+                                        on_click=lambda e: (
+                                            self._open_in_browser(e)
+                                            if self.selected_message
+                                            else None
+                                        ),
+                                        style=ft.ButtonStyle(
+                                            color=ft.Colors.WHITE,
+                                            bgcolor=ft.Colors.BLUE_700,
+                                            padding=ft.Padding.symmetric(horizontal=15, vertical=12),
+                                            shape=ft.RoundedRectangleBorder(
+                                                radius=8
+                                            ),
+                                        ),
+                                    ),
+                                ],
+                                alignment=ft.MainAxisAlignment.END,
+                            ),
+                            self.html_markdown,
+                        ],
+                        spacing=10,
+                    ),
+                    bgcolor=ft.Colors.BLACK_45,
+                    border_radius=8,
+                    padding=10,
+                    expand=True,
+                ),
+                self.plain_text_field,
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            self.no_attachments_text,
+                            self.attachments_list,
+                        ],
+                        spacing=10,
+                    ),
+                    bgcolor=ft.Colors.BLACK_45,
+                    border_radius=8,
+                    padding=10,
+                    expand=True,
+                ),
+            ],
+        )
+
+        self.content_tabs = ft.Tabs(
+            length=3,
+            selected_index=0,
+            animation_duration=300,
+            content=ft.Column(
+                expand=True,
+                controls=[
+                    tab_bar,
+                    tab_bar_view,
+                ],
+            ),
+            expand=True,
+        )
+
         self.email_details = ft.Container(
             content=ft.Column(
                 [
@@ -338,36 +545,15 @@ class EmailTestingApp:
                         color=ft.Colors.WHITE,
                     ),
                     ft.Container(
-                        content=ft.TextField(
-                            label="From",
-                            read_only=True,
-                            multiline=True,
-                            border_color=ft.Colors.BLUE_700,
-                            bgcolor=ft.Colors.BLACK45,
-                            color=ft.Colors.WHITE,
-                        ),
+                        content=self.email_from_field,
                         padding=5,
                     ),
                     ft.Container(
-                        content=ft.TextField(
-                            label="To",
-                            read_only=True,
-                            multiline=True,
-                            border_color=ft.Colors.BLUE_700,
-                            bgcolor=ft.Colors.BLACK45,
-                            color=ft.Colors.WHITE,
-                        ),
+                        content=self.email_to_field,
                         padding=5,
                     ),
                     ft.Container(
-                        content=ft.TextField(
-                            label="Subject",
-                            read_only=True,
-                            multiline=True,
-                            border_color=ft.Colors.BLUE_700,
-                            bgcolor=ft.Colors.BLACK45,
-                            color=ft.Colors.WHITE,
-                        ),
+                        content=self.email_subject_field,
                         padding=5,
                     ),
                     ft.Container(
@@ -379,90 +565,7 @@ class EmailTestingApp:
                                     weight=ft.FontWeight.BOLD,
                                     color=ft.Colors.WHITE,
                                 ),
-                                ft.Tabs(
-                                    selected_index=0,
-                                    animation_duration=300,
-                                    tabs=[
-                                        ft.Tab(
-                                            text="HTML View",
-                                            content=ft.Container(
-                                                content=ft.Column(
-                                                    [
-                                                        ft.Row(
-                                                            [
-                                                                ft.ElevatedButton(
-                                                                    "Open in Browser",
-                                                                    icon=ft.Icons.LAUNCH,
-                                                                    on_click=lambda e: (
-                                                                        self._open_in_browser(
-                                                                            e
-                                                                        )
-                                                                        if self.selected_message
-                                                                        else None
-                                                                    ),
-                                                                    style=ft.ButtonStyle(
-                                                                        color=ft.Colors.WHITE,
-                                                                        bgcolor=ft.Colors.BLUE_700,
-                                                                        shape=ft.RoundedRectangleBorder(
-                                                                            radius=8
-                                                                        ),
-                                                                    ),
-                                                                ),
-                                                            ],
-                                                            alignment=ft.MainAxisAlignment.END,
-                                                        ),
-                                                        ft.Markdown(
-                                                            "",
-                                                            selectable=True,
-                                                            extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
-                                                        ),
-                                                    ],
-                                                    spacing=10,
-                                                ),
-                                                bgcolor=ft.Colors.BLACK45,
-                                                border_radius=8,
-                                                padding=10,
-                                                expand=True,
-                                            ),
-                                        ),
-                                        ft.Tab(
-                                            text="Plain Text",
-                                            content=ft.TextField(
-                                                read_only=True,
-                                                multiline=True,
-                                                border_color=ft.Colors.BLUE_700,
-                                                bgcolor=ft.Colors.BLACK45,
-                                                color=ft.Colors.WHITE,
-                                                expand=True,
-                                            ),
-                                        ),
-                                        ft.Tab(
-                                            text="Attachments",
-                                            content=ft.Container(
-                                                content=ft.Column(
-                                                    [
-                                                        ft.Text(
-                                                            "No attachments",
-                                                            color=ft.Colors.GREY_400,
-                                                            visible=True,
-                                                        ),
-                                                        ft.ListView(
-                                                            spacing=10,
-                                                            padding=10,
-                                                            expand=True,
-                                                        ),
-                                                    ],
-                                                    spacing=10,
-                                                ),
-                                                bgcolor=ft.Colors.BLACK45,
-                                                border_radius=8,
-                                                padding=10,
-                                                expand=True,
-                                            ),
-                                        ),
-                                    ],
-                                    expand=True,
-                                ),
+                                self.content_tabs,
                             ],
                             spacing=10,
                         ),
@@ -477,6 +580,7 @@ class EmailTestingApp:
                                 style=ft.ButtonStyle(
                                     color=ft.Colors.WHITE,
                                     bgcolor=ft.Colors.RED_700,
+                                    padding=ft.Padding.symmetric(horizontal=15, vertical=12),
                                     shape=ft.RoundedRectangleBorder(radius=8),
                                 ),
                             ),
@@ -486,6 +590,7 @@ class EmailTestingApp:
                                 style=ft.ButtonStyle(
                                     color=ft.Colors.WHITE,
                                     bgcolor=ft.Colors.BLUE_700,
+                                    padding=ft.Padding.symmetric(horizontal=15, vertical=12),
                                     shape=ft.RoundedRectangleBorder(radius=8),
                                 ),
                             ),
@@ -495,7 +600,7 @@ class EmailTestingApp:
                 ],
                 spacing=10,
             ),
-            bgcolor=ft.Colors.BLACK45,
+            bgcolor=ft.Colors.BLACK_45,
             border_radius=8,
             padding=20,
             expand=True,
@@ -523,7 +628,7 @@ class EmailTestingApp:
                     spacing=10,
                 ),
                 padding=10,
-                bgcolor=ft.Colors.BLACK45,
+                bgcolor=ft.Colors.BLACK_45,
                 border_radius=8,
             ),
             ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
@@ -559,18 +664,17 @@ class EmailTestingApp:
         )
 
         # Start auto-refresh timer
-        def auto_refresh():
-            if self.email_server.is_running() and not self._refresh_running:
-                self.refresh_emails(None)
-            page.update()
+        async def auto_refresh(page):
+            while not self._cleanup_complete:
+                try:
+                    if self.email_server and self.email_server.is_running() and not self._refresh_running:
+                        self.refresh_emails(None)
+                    page.update()
+                except Exception as e:
+                    logger.error(f"Error during auto-refresh: {str(e)}")
+                await asyncio.sleep(5)
 
-        while True:
-            try:
-                auto_refresh()
-                time.sleep(5)  # Refresh every 5 seconds
-            except Exception as e:
-                logger.error(f"Error during auto-refresh: {str(e)}")
-                break
+        page.run_task(auto_refresh, page)
 
     def toggle_server(
         self, e: Optional[Union[ft.ControlEvent, Exception]] = None
@@ -867,17 +971,14 @@ class EmailTestingApp:
             self.read_messages.add(message["id"])  # Mark as read when opened
 
             # Update header fields
-            self.email_details.content.controls[1].content.value = message["from"]
-            self.email_details.content.controls[2].content.value = message["to"]
-            self.email_details.content.controls[3].content.value = message["subject"]
-
-            # Get the content tabs container
-            content_tabs = self.email_details.content.controls[4].content.controls[1]
+            self.email_from_field.value = message["from"]
+            self.email_to_field.value = message["to"]
+            self.email_subject_field.value = message["subject"]
 
             # Update HTML view
             if message.get("is_html") and message.get("html_content"):
                 # Create a temporary HTML file for the email content
-                html_file = self._create_html_file(
+                self._create_html_file(
                     message["html_content"], message["id"]
                 )
                 # Convert HTML to Markdown for display
@@ -886,28 +987,20 @@ class EmailTestingApp:
                 h.ignore_images = False
                 h.ignore_emphasis = False
                 markdown_content = h.handle(message["html_content"])
-                content_tabs.tabs[0].content.content.controls[
-                    1
-                ].value = markdown_content
+                self.html_markdown.value = markdown_content
                 # Update the container to use a fixed width and center the content
-                content_tabs.tabs[0].content.content.controls[1].width = 800
-                content_tabs.tabs[0].content.content.controls[
-                    1
-                ].alignment = ft.MainAxisAlignment.CENTER
+                self.html_markdown.width = 800
+                self.html_markdown.alignment = ft.MainAxisAlignment.CENTER
             else:
-                content_tabs.tabs[0].content.content.controls[1].value = message["body"]
+                self.html_markdown.value = message["body"]
 
             # Update plain text view
-            content_tabs.tabs[1].content.value = message["body"]
+            self.plain_text_field.value = message["body"]
 
             # Update attachments view
-            attachments_container = content_tabs.tabs[2].content
-            attachments_list = attachments_container.content.controls[1]
-            no_attachments_text = attachments_container.content.controls[0]
-
             if message.get("attachments"):
-                no_attachments_text.visible = False
-                attachments_list.controls.clear()
+                self.no_attachments_text.visible = False
+                self.attachments_list.controls.clear()
                 
                 for attachment in message["attachments"]:
                     # Format file size
@@ -951,6 +1044,7 @@ class EmailTestingApp:
                                         style=ft.ButtonStyle(
                                             color=ft.Colors.WHITE,
                                             bgcolor=ft.Colors.BLUE_700,
+                                            padding=ft.Padding.symmetric(horizontal=15, vertical=10),
                                             shape=ft.RoundedRectangleBorder(radius=8),
                                         ),
                                     ),
@@ -958,18 +1052,18 @@ class EmailTestingApp:
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                             ),
                             padding=10,
-                            bgcolor=ft.Colors.BLACK45,
+                            bgcolor=ft.Colors.BLACK_45,
                             border_radius=8,
                         ),
                         elevation=1,
                     )
-                    attachments_list.controls.append(attachment_card)
+                    self.attachments_list.controls.append(attachment_card)
             else:
-                no_attachments_text.visible = True
-                attachments_list.controls.clear()
+                self.no_attachments_text.visible = True
+                self.attachments_list.controls.clear()
 
             # Reset to first tab
-            content_tabs.selected_index = 0
+            self.content_tabs.selected_index = 0
 
             self.email_details.visible = True
             self.email_details.update()
@@ -1110,7 +1204,7 @@ def main():
     try:
         logger.info("Starting Email Testing Server application")
         app = EmailTestingApp()
-        ft.app(target=app.main, assets_dir="assets")
+        ft.run(app.main, assets_dir="assets")
     except Exception as e:
         logger.error(f"Application error: {str(e)}")
         raise

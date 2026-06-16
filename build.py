@@ -15,7 +15,13 @@ import stat
 
 # Build configuration
 APP_NAME = "email-testing-server"
-VERSION = "1.1.0"
+
+# Load version dynamically from version.py
+version_globals = {}
+with open("version.py") as f:
+    exec(f.read(), version_globals)
+VERSION = version_globals.get("__version__", "2.0.0")
+
 AUTHOR = "Ananthu Krishnan <dev.ananthu.krishnan@gmail.com>"
 DESCRIPTION = "Local Email Testing Server - A desktop application for testing email functionality locally"
 MAINTAINER = "Ananthu Krishnan"
@@ -92,60 +98,11 @@ def setup_virtual_env():
 
 def install_dependencies(python_exe, pip_exe):
     print("Installing dependencies in virtual environment...")
-    deps = [
-        "flet==0.28.3",  # Updated to exact version from requirements.txt
-        "flet-cli==0.28.3",
-        "flet-desktop==0.28.3",
-        # "flet-desktop-light==0.28.3",
-        "flet-web==0.28.3",
-        "aiosmtpd==1.4.6",
-        "html2text==2025.4.15",
-        "PyQt6==6.9.0",
-        "PyQt6-Qt6==6.9.0",
-        "PyQt6_sip==13.10.2",
-        "Pillow==10.2.0",
-        "python-dotenv==1.1.0",
-        "requests==2.31.0",
-        "dnspython==2.7.0",
-        "pyinstaller==6.3.0",
-        "pyinstaller-hooks-contrib==2025.4",
-        "cryptography==42.0.5",
-        "websockets==15.0.1",
-        "fastapi==0.115.12",
-        "uvicorn==0.34.2",
-        "starlette==0.46.2",
-        "pydantic==2.11.5",
-        "pydantic_core==2.33.2",
-        "typing_extensions==4.13.2",
-        "anyio==4.9.0",
-        "click==8.2.1",
-        "h11==0.16.0",
-        "httpx==0.28.1",
-        "idna==3.10",
-        "sniffio==1.3.1",
-        "watchfiles==1.0.5",
-        "watchdog==4.0.2",
-        "rich==14.0.0",
-        "pygments==2.19.1",
-        "markdown-it-py==3.0.0",
-        "mdurl==0.1.2",
-        "packaging==25.0",
-        "platformdirs==4.2.0",
-        "toml==0.10.2",
-        "tomlkit==0.12.4",
-        "pyproject_hooks==1.0.0",
-        "build==1.0.3",
-        "installer==0.7.0",
-        "wheel==0.42.0",
-        "setuptools==69.2.0",
-    ]
-    for dep in deps:
-        try:
-            print(f"Installing {dep}...")
-            subprocess.run([pip_exe, "install", dep], check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"Error installing {dep}: {e}")
-            raise
+    try:
+        subprocess.run([pip_exe, "install", "-r", "requirements.txt"], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error installing dependencies from requirements.txt: {e}")
+        raise
 
 
 def create_version_file():
@@ -287,8 +244,6 @@ def build_executable():
         "rich",
         "--collect-all",
         "markdown_it",
-        "--collect-all",
-        "PyQt6",
     ]
 
     # Add all Flet components
@@ -316,11 +271,6 @@ def build_executable():
         "aiosmtpd.handlers",
         "PIL",
         "PIL._tkinter_finder",
-        "PyQt6",
-        "PyQt6.QtCore",
-        "PyQt6.QtGui",
-        "PyQt6.QtWidgets",
-        "PyQt6.sip",
         "requests",
         "html2text",
         "cryptography",
