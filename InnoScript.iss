@@ -1,29 +1,24 @@
 [Setup]
-AppName=Email Testing Server
-AppVersion=1.1
+AppName=Postroom
+AppVersion=3.0.0
 AppPublisher=shadowAKR
-DefaultDirName={autopf}\Email Testing Server
-UninstallDisplayIcon={app}\email-testing-server.exe
-CreateAppDir=yes
-OutputBaseFilename=Email Testing Server Installer
+DefaultDirName={autopf}\Postroom
+UninstallDisplayIcon={app}\postroom.exe
+OutputDir=build\bin
+OutputBaseFilename=Postroom-Setup
 SolidCompression=yes
 WizardStyle=modern
+ArchitecturesAllowed=x64compatible
 
 [Files]
-Source: "C:\Users\AnanthuKrishnan\Documents\MyProjects\email-testing-server\dist\email-testing-server.exe"; DestDir: "{app}"; Flags: ignoreversion
-
-; Add any other assets that were NOT bundled by flet/PyInstaller
-; Source: "path\to\your\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "build\bin\postroom.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Icons]
-Name: "{group}\Email Testing Server"; Filename: "{app}\email-testing-server.exe"
-Name: "{autodesktop}\Email Testing Server"; Filename: "{app}\email-testing-server.exe"; Tasks: desktopicon
+Name: "{group}\Postroom"; Filename: "{app}\postroom.exe"
+Name: "{autodesktop}\Postroom"; Filename: "{app}\postroom.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\email-testing-server.exe"; Description: "Launch Email Testing Server"; Flags: postinstall skipifsilent
-
-[UninstallRun]
-; Optional: Add any cleanup commands if necessary
+Filename: "{app}\postroom.exe"; Description: "Launch Postroom"; Flags: postinstall skipifsilent
