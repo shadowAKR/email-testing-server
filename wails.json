@@ -1,0 +1,15 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "postroom",
+  "outputfilename": "postroom",
+  "frontend:install": "npm ci",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": { "name": "Postroom" },
+  "info": {
+    "productName": "Postroom",
+    "productVersion": "3.0.0",
+    "comments": "Local SMTP capture and inspection"
+  }
+}

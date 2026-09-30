@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Postroom
+Exec=postroom
+Icon=${SNAP}/meta/gui/postroom.png
+Type=Application
+Terminal=false
+Categories=Network;Email;Development;
+StartupWMClass=postroom
+StartupNotify=true

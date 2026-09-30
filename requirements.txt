@@ -1,9 +1,0 @@
-flet>=0.85.3
-flet-desktop>=0.85.3
-flet-web>=0.85.3
-flet-cli>=0.85.3
-aiosmtpd>=1.4.6
-html2text>=2024.2.26
-Pillow>=10.4.0
-pyinstaller>=6.15.0
-pyinstaller-hooks-contrib>=2025.4
